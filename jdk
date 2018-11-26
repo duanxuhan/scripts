@@ -1,0 +1,63 @@
+#!/bin/bash
+# 安装配置JDK 7
+App=jdk
+AppName=JDK
+AppBase=/App
+AppDir=$AppBase/jdk
+AppSrcBase=/root/src
+AppSrcFile=$App-*.tar.*
+AppSrcDir=$(find $AppSrcBase -maxdepth 1 -name "$App*" -type d | sed 's/^.\///')
+
+ScriptDir=$(cd $(dirname $0); pwd)
+ScriptFile=$(basename $0)
+
+# 安装
+Install() 
+{
+    [ -d "$JAVA_HOME" ] && echo "$AppName 已安装" && exit
+
+    cd $AppSrcBase
+    [ -d "$AppSrcDir" ] && rm -rf $AppSrcDir
+
+    tar zxf $AppSrcFile || tar jxf $AppSrcFile || tar Jxf $AppSrcFile
+    AppSrcDir=$(find $AppSrcBase -maxdepth 1 -name "$App*" -type d | sed 's/^.\///')
+    mv $AppSrcDir $AppDir && echo "$AppName 安装成功" || echo "$AppName 安装失败"
+}
+
+# 重装
+Reinstall()
+{
+    Remove && Install
+}
+
+# 删除
+Remove() 
+{
+    [ -d "$AppDir" ] && rm -rf $AppDir
+    [ $? -eq 0 ] && echo "删除 $AppName" || echo "$AppName 未安装"
+}
+
+# 初始化
+Init() 
+{
+ln -s $AppDir/bin/java /bin/java
+grep -q "JAVA_HOME" /etc/profile || cat >> /etc/profile << EOF
+########################################
+export JAVA_HOME=$AppDir
+export JRE_HOME=\$JAVA_HOME/jre
+export PATH=\$JAVA_HOME/bin:\$JRE_HOME/bin:\$PATH
+export CLASSPATH=\$JAVA_HOME/lib:\$JRE_HOME/lib:./
+EOF
+
+[ $? -eq 0 ] && echo "初始化 $AppName 配置" || echo "初始化 $AppName 配置失败"
+}
+
+case "$1" in
+    "install"  ) Install;;
+    "reinstall") Reinstall;;
+    "remove"   ) Remove;;
+    "init"     ) Init;;
+    * )
+        echo "用法：$ScriptFile {install | reinstall | remove | init}"
+        ;;
+esac

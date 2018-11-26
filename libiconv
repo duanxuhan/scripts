@@ -1,0 +1,41 @@
+#!/bin/bash
+# 安装、更新libiconv库
+App=libiconv
+AppName="libiconv库"
+AppDir=/usr/local
+AppSrcBase=/root/src
+AppSrcFile=$App-*.tar.*
+AppSrcDir=$(find $AppSrcBase -maxdepth 1 -name "$AppSrcFile" -type f | sed -e 's/.tar.*$//')
+
+# 安装
+Install()
+{
+    test -f $AppDir/lib/$App.so && echo "$AppName已安装" || Update
+}
+
+# 更新
+Update()
+{
+    cd $AppSrcBase
+    test -d $AppSrcDir && rm -rf $AppSrcDir
+
+    tar zxf $AppSrcFile || tar jxf $AppSrcFile || tar Jxf $AppSrcFile
+    cd $AppSrcDir
+    cd srclib/
+    sed -i -e '/gets is a security/d' ./stdio.in.h
+    cd ../
+    ./configure --prefix=$AppDir && make && make install
+    [ $? -eq 0 ] && echo "$AppName安装成功" || echo "$AppName安装失败"
+
+    grep -q "$AppDir/lib" /etc/ld.so.conf.d/app.conf || echo "$AppDir/lib" >> /etc/ld.so.conf.d/app.conf
+    ldconfig
+}
+
+ScriptFile=$(basename $0)
+case "$1" in
+    "install") Install;;
+    "update" ) Update;;
+    * )
+    echo "用法：$ScriptFile {install | update}"
+    ;;
+esac

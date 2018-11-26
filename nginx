@@ -1,0 +1,259 @@
+#!/bin/bash
+# 编译安装管理Nginx
+App=nginx
+AppName=Nginx
+AppBase=/App
+AppDir=$AppBase/$App
+AppProg=$AppDir/sbin/nginx
+AppConf=$AppDir/conf/nginx.conf
+
+AppSrcBase=/root/src
+AppSrcFile=$App-*.tar.*
+AppSrcDir=$(find $AppSrcBase -maxdepth 1 -name "$AppSrcFile" -type f 2> /dev/null | sed -e 's/\.tar.*$//' -e 's/^.\///')
+AppUser=$(grep "^[[:space:]]*user" $AppConf 2> /dev/null | sed 's/;//g' | awk '{print $2}')
+AppGroup=$(grep "^[[:space:]]*user" $AppConf 2> /dev/null | sed 's/;//g' | awk '{print $3}')
+AppPidDir=$(dirname $(grep "^[[:space:]]*pid" $AppConf 2> /dev/null | awk '{print $2}' | sed 's/;$//') 2> /dev/null)
+AppProxyTempDir=$(grep "^[[:space:]]*proxy_temp_path" $AppConf 2> /dev/null | awk '{print $2}' | sed 's/;$//')
+AppProxyCacheDir=$(grep "^[[:space:]]*proxy_cache_path" $AppConf 2> /dev/null | awk '{print $2}' | sed 's/;$//')
+AppFastCGITempDir=$(grep "^[[:space:]]*fastcgi_temp_path" $AppConf 2> /dev/null | awk '{print $2}' | sed 's/;$//')
+AppFastCGICacheDir=$(grep "^[[:space:]]*fastcgi_cache_path" $AppConf 2> /dev/null | awk '{print $2}' | sed 's/;$//')
+
+AppUser=${AppUser:-nobody}
+AppGroup=${AppGroup:-nobody}
+AppPidDir=${AppPidDir:-$AppDir/logs}
+
+RemoveFlag=0
+InstallFlag=0
+
+ScriptDir=$(cd $(dirname $0); pwd)
+ScriptFile=$(basename $0)
+
+# 获取PID
+Pid()
+{
+    AppPid=$(ps ax | grep "nginx:" | grep "process" | grep -v "grep" | awk '{print $1}' 2> /dev/null)
+}
+
+# 安装
+Install()
+{
+    Pid
+    InstallFlag=1
+
+    if [ -z "$AppPid" ]; then
+        test -f "$AppProg" && echo "$AppName 已安装"
+        [ $? -ne 0 ] && Update && Conf
+    else
+        echo "$AppName 正在运行"
+    fi
+}
+
+# 更新
+Update()
+{
+    Operate="更新"
+    [ $InstallFlag -eq 1 ] && Operate="安装"
+    [ $RemoveFlag -ne 1 ] && Backup
+
+    cd $AppSrcBase
+    test -d "$AppSrcDir" && rm -rf $AppSrcDir
+
+    tar zxf $AppSrcFile || tar jxf $AppSrcFile || tar Jxf $AppSrcFile
+    cd $AppSrcDir
+
+    ./configure \
+    "--prefix=$AppDir" \
+    "--with-http_stub_status_module" \
+    "--with-http_gzip_static_module" \
+    "--with-http_ssl_module" \
+    "--with-http_v2_module" \
+    "--with-threads" \
+    "--with-file-aio" \
+    "--without-http_auth_basic_module" \
+    "--without-http_browser_module" \
+    "--without-http_empty_gif_module" \
+    "--without-http_geo_module" \
+    "--without-http_map_module" \
+    "--without-http_memcached_module" \
+    "--without-http_scgi_module" \
+    "--without-http_split_clients_module" \
+    "--without-http_userid_module" \
+    "--without-http_uwsgi_module" \
+    "--without-mail_imap_module" \
+    "--without-mail_pop3_module" \
+    "--without-mail_smtp_module" \
+    "--without-poll_module" \
+    "--without-select_module"
+
+    [ $? -eq 0 ] && make && make install
+
+    if [ $? -eq 0 ]; then
+        echo "$AppName ${Operate}成功"
+    else
+        echo "$AppName ${Operate}失败"
+        exit 1
+    fi
+}
+
+# 重装
+Reinstall()
+{
+    Remove && Install
+}
+
+# 删除
+Remove()
+{
+    Pid
+    RemoveFlag=1
+
+    if [ -z "$AppPid" ]; then
+        if [ -d "$AppDir" ]; then
+            rm -rf $AppDir && echo "删除 $AppName"
+        else
+            echo "$AppName 未安装"
+        fi
+    else
+        echo "$AppName 正在运行" && exit
+    fi
+}
+
+# 备份
+Backup()
+{
+    if [ -f "$AppProg" ]; then
+        cd $AppBase
+        cp -r $App "${App}.$(date +%Y%m%d%H%M%S)"
+        [ $? -eq 0 ] && echo "$AppName 备份成功" || echo "$AppName 备份失败"
+    else
+        echo "$AppName 未安装"
+    fi
+}
+
+# 初始化
+Init()
+{
+    echo "初始化 $AppName"
+    groupadd $AppGroup && echo "新建组: $AppGroup"
+    useradd -s $(which false) -M -g $AppGroup $AppUser && echo "新建用户: $AppUser"
+    cd $AppDir
+    [ ! -e "$AppPidDir" ] && mkdir -p $AppPidDir
+    [ -n "$AppProxyTempDir" ] && mkdir -p $AppProxyTempDir && chown $AppUser $AppProxyTempDir
+    [ -n "$AppProxyCacheDir" ] && mkdir -p $AppProxyCacheDir && chown $AppUser $AppProxyCacheDir
+    [ -n "$AppFastCGITempDir" ] && mkdir -p $AppFastCGITempDir && chown $AppUser $AppFastCGITempDir
+    [ -n "$AppFastCGICacheDir" ] && mkdir -p $AppFastCGICacheDir && chown $AppUser $AppFastCGICacheDir
+}
+
+# 启动
+Start()
+{
+    Pid
+    if [ -n "$AppPid" ]; then
+        echo "$AppName 正在运行"
+    else
+        $AppProg && echo "启动 $AppName"
+    fi
+}
+
+# 停止
+Stop()
+{
+    Pid
+    if [ -n "$AppPid" ]; then
+        $AppProg -s stop && echo "停止 $AppName"
+    else
+        echo "$AppName 未启动"
+    fi
+}
+
+# 重启
+Restart()
+{
+    Pid
+    [ -n "$AppPid" ] && Stop && sleep 1
+    Start
+}
+
+# 查询状态
+Status()
+{
+    Pid
+
+    if [ ! -f "$AppProg" ]; then
+        echo "$AppName 未安装"
+    else
+        echo "$AppName 已安装"
+        if [ -z "$AppPid" ]; then
+            echo "$AppName 未启动"
+        else
+            echo "$AppName 正在运行"
+        fi
+    fi
+}
+
+# 拷贝修改配置
+Conf()
+{
+    cp $ScriptDir/$(basename $AppConf) $AppConf
+    sed -i 's#/$nginx_version##' $AppDir/conf/fastcgi.conf
+}
+
+# 检查配置
+Check()
+{
+    $AppProg -t && echo "$AppName 配置正确" || echo "$AppName 配置错误"
+}
+
+# 重载配置
+Reload()
+{
+    Pid
+    if [ -n "$AppPid" ]; then
+        $AppProg -s reload && echo "重载 $AppName 配置"
+    else
+        echo "$AppName 未启动"
+    fi
+}
+
+# 终止进程
+Kill()
+{
+    Pid
+    if [ -n "$AppPid" ]; then
+        echo "$AppPid" | xargs kill -9
+        [ $? -eq 0 ] && echo "终止 $AppName 进程"
+    fi
+}
+
+case "$1" in
+    "install"   ) Install;;
+    "update"    ) Update;;
+    "reinstall" ) Reinstall;;
+    "remove"    ) Remove;;
+    "backup"    ) Backup;;
+    "init"      ) Init;;
+    "start"     ) Start;;
+    "stop"      ) Stop;;
+    "restart"   ) Restart;;
+    "status"    ) Status;;
+    "conf"      ) Conf;;
+    "check"     ) Check;;
+    "reload"    ) Reload;;
+    "kill"      ) Kill;;
+    *           )
+    echo "$ScriptFile install              安装 $AppName"
+    echo "$ScriptFile update               更新 $AppName"
+    echo "$ScriptFile reinstall            重装 $AppName"
+    echo "$ScriptFile remove               删除 $AppName"
+    echo "$ScriptFile backup               备份 $AppName"
+    echo "$ScriptFile init                 初始化 $AppName"
+    echo "$ScriptFile start                启动 $AppName"
+    echo "$ScriptFile stop                 停止 $AppName"
+    echo "$ScriptFile restart              重启 $AppName"
+    echo "$ScriptFile status               查询 $AppName 状态"
+    echo "$ScriptFile conf                 拷贝 $AppName 配置"
+    echo "$ScriptFile check                检查 $AppName 配置"
+    echo "$ScriptFile reload               重载 $AppName 配置"
+    echo "$ScriptFile kill                 终止 $AppName 进程"
+    ;;
+esac
